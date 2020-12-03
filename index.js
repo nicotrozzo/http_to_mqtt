@@ -11,13 +11,16 @@ var settings = {
     },
     debug: process.env.DEBUG_MODE || false,
     auth_key: process.env.AUTH_KEY || '',
-    http_port: process.env.PORT || 5000
+    http_port: process.env.PORT || 5000,
+    topic_player: process.env.TOPIC_PLAYER,
+    topic_obstacle: process.env.TOPIC_OBSTACLE
 }
 
 var mqtt = require('mqtt');
 var express = require('express');
 var bodyParser = require('body-parser');
 var multer = require('multer');
+var cors = require('cors'); 
 
 var app = express();
 
@@ -38,6 +41,7 @@ function getMqttClient() {
 var mqttClient = getMqttClient();
 
 app.set('port', settings.http_port);
+app.set('ip', settings.http_ip);
 app.use(bodyParser.json());
 
 function logRequest(req, res, next) {
@@ -102,13 +106,41 @@ function ensureTopicSpecified(req, res, next) {
     }
 }
 
+// Really nasty middleware to convert from the color string I get from IFTTT to the RGB components
+// the ESP8266 is expecting
+function color2rgb(req, res, next) {
+    if ((req.body.topic === settings.topic_player) || (req.body.topic === settings.topic_obstacle))
+    {
+        if (req.body.message) {
+            var r = 5, g = 0, b = 0;    // Red by default
+            if (req.body.message == "rojo") {
+                r = 5;
+            }
+            else if (req.body.message == "verde") {
+                g = 5;
+            }
+            else if (req.body.message == "azul") {
+                b = 5;
+            }
+            else if (req.body.message == "magenta") {
+                r = 207 * 5 / 255;
+                g = 52 * 5 / 255;
+                b = 118 * 5 / 255;
+            }
+            req.body.message = 'RGB(' + Math.trunc(r) + ', ' + Math.trunc(g) + ', ' + Math.trunc(b) + ')';
+        }
+    }
+    next();
+}
+
 app.get('/keep_alive/', logRequest, function (req, res) {
     mqttClient.publish(settings.keepalive.topic, settings.keepalive.message);
     res.sendStatus(200);
 });
 
-app.post('/post/', logRequest, authorizeUser, checkSingleFileUpload, checkMessagePathQueryParameter, checkTopicQueryParameter, ensureTopicSpecified, function (req, res) {
+app.post('/post/', cors(), logRequest, authorizeUser, checkSingleFileUpload, checkMessagePathQueryParameter, checkTopicQueryParameter, ensureTopicSpecified, color2rgb, function (req, res) {
     mqttClient.publish(req.body['topic'], req.body['message']);
+    console.log("Published: [topic] " + req.body['topic'] + " [payload] " + req.body['message']);
     res.sendStatus(200);
 });
 
